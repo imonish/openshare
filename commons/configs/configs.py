@@ -86,11 +86,23 @@ class ConfigManager:
                 f"Unsupported SECRET_PROVIDER: {provider}"
             )
 
-    def get(self, key: str, default=None):
+    def get(self, key: str, default=None, data_type=str):
         """
         Unified access method.
         """
-        return self.client.get(key, default)
+        value = self.client.get(key, default)
+        if data_type == int:
+            return int(value) if value is not None else default
+        elif data_type == float:
+            return float(value) if value is not None else default
+        elif data_type == bool:
+            return value.lower() in ("true", "1", "yes") if isinstance(value, str) else bool(value)
+        elif data_type == list:
+            return value.split(",") if isinstance(value, str) else list(value)
+        elif data_type == dict:
+            import json
+            return json.loads(value) if isinstance(value, str) else dict(value)
+        return value
 
 
 

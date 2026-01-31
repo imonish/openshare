@@ -12,6 +12,8 @@ https://docs.djangoproject.com/en/5.1/ref/settings/
 
 from pathlib import Path
 
+from commons.configs.configs import config
+
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -20,12 +22,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-vwrfv9d^*-y39k&3xx&o&47jb-c6^o1ruj%6czd0!m=y-w%w!n'
+SECRET_KEY = config.get("DJANGO_SECRET_KEY", "django-insecure-default-key", data_type=str)
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = config.get("DJANGO_DEBUG", True, data_type=bool)
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = config.get("DJANGO_ALLOWED_HOSTS", [], data_type=list)
 
 
 # Application definition
@@ -75,8 +77,12 @@ WSGI_APPLICATION = 'openshare.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': config.get("POSTGRES_DB", data_type=str),
+        'USER': config.get("POSTGRES_USER", data_type=str),
+        'PASSWORD': config.get("POSTGRES_PASSWORD", data_type=str),
+        'HOST': config.get("POSTGRES_HOST", data_type=str),
+        'PORT': config.get("POSTGRES_PORT", data_type=str),
     }
 }
 
