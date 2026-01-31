@@ -1,0 +1,136 @@
+name: Deploy Staging API with Docker Compose
+
+on:
+  push:
+    branches:
+      - staging
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v2
+
+    - name: Set up SSH
+      run: |
+        echo "$STAGING_API_SERVER_SSH_KEY" > private_key
+        chmod 600 private_key
+      env:
+        STAGING_API_SERVER_SSH_KEY: ${{ secrets.STAGING_API_SERVER_SSH_KEY }}
+
+    - name: Deploy to Staging EC2 and Rebuild Docker
+      run: |
+        ssh -i private_key -o StrictHostKeyChecking=no ${{ secrets.STAGING_API_SERVER_USERNAME }}@${{ secrets.STAGING_API_SERVER_IP }} << 'EOF'
+          WEBHOOK_URL="${{ secrets.STAGING_API_WEBHOOK_URL }}"
+          PROJECT_NAME="${{ secrets.STAGING_API_PROJECT_NAME }}"
+          PROJECT_DIR="${{ secrets.STAGING_API_PROJECT_DIR }}"
+
+          # Notify deployment started
+          curl -X POST -H "Content-Type: application/json" \
+            -d "{
+              \"embeds\": [{
+                \"title\": \"🚀 Deployment Started - $PROJECT_NAME\",
+                \"color\": 16776960,
+                \"fields\": [
+                  { \"name\": \"📂 Repository\", \"value\": \"\`${{ github.repository }}\`\", \"inline\": true },
+                  { \"name\": \"🛠 Branch\", \"value\": \"\`${{ github.ref_name }}\`\", \"inline\": true },
+                  { \"name\": \"👤 Triggered By\", \"value\": \"\`${{ github.actor }}\`\", \"inline\": true }
+                ],
+                \"footer\": { \"text\": \"GitHub Actions | $(date +'%Y-%m-%d %H:%M:%S')\" }
+              }]
+            }" $WEBHOOK_URL
+
+          cd $PROJECT_DIR
+          git pull origin ${{ secrets.STAGING_API_BRANCH }}
+          docker compose down
+          docker compose build
+          docker compose up -d
+
+          # --- Intelligent wait for container states (from status check workflow) ---
+          ATTEMPTS=5
+          DELAY=15
+          STABLE=false
+
+          for i in $(seq 1 $ATTEMPTS); do
+            echo "Attempt $i/$ATTEMPTS: Checking container status..."
+
+            docker compose ps --format json 2>/dev/null | jq -s '.' > status.json
+
+            HARD_FAILED=$(jq '[.[] | select(.State=="exited" or .State=="dead")] | length' status.json)
+            TRANSIENT=$(jq '[.[] | select(
+                .State=="restarting" or
+                .State=="created" or
+                .State=="paused" or
+                .State=="removing" or
+                ((.Health // "")=="starting") or
+                ((.Health // "")=="unhealthy")
+              )] | length' status.json)
+
+            if [ "$HARD_FAILED" -gt 0 ]; then
+              echo "❌ Found $HARD_FAILED hard-failed containers."
+              break
+            fi
+
+            if [ "$TRANSIENT" -eq 0 ]; then
+              echo "✅ All containers stable."
+              STABLE=true
+              break
+            fi
+
+            if [ "$i" -lt "$ATTEMPTS" ]; then
+              echo "⏳ $TRANSIENT transient containers. Waiting $DELAY seconds..."
+              sleep $DELAY
+            else
+              echo "⚠️ Still transient after $ATTEMPTS attempts."
+            fi
+          done
+
+          TOTAL_CONTAINERS=$(jq '. | length' status.json)
+          RUNNING_CONTAINERS=$(jq '[.[] | select(.State=="running")] | length' status.json)
+          FAILED_CONTAINERS=$((TOTAL_CONTAINERS - RUNNING_CONTAINERS))
+
+          if [ "$STABLE" = true ] && [ "$FAILED_CONTAINERS" -eq 0 ]; then
+            echo "✅ All containers are healthy!"
+
+            # Notify successful deployment
+            curl -X POST -H "Content-Type: application/json" \
+              -d "{
+                \"embeds\": [{
+                  \"title\": \"✅ Deployment Successful - $PROJECT_NAME\",
+                  \"color\": 65280,
+                  \"fields\": [
+                    { \"name\": \"📂 Repository\", \"value\": \"\`${{ github.repository }}\`\", \"inline\": true },
+                    { \"name\": \"🛠 Branch\", \"value\": \"\`${{ github.ref_name }}\`\", \"inline\": true },
+                    { \"name\": \"👤 Deployed By\", \"value\": \"\`${{ github.actor }}\`\", \"inline\": true },
+                    { \"name\": \"📦 Container Status\", \"value\": \"\`Running: $RUNNING_CONTAINERS / $TOTAL_CONTAINERS\`\" }
+                  ],
+                  \"footer\": { \"text\": \"GitHub Actions | $(date +'%Y-%m-%d %H:%M:%S')\" }
+                }]
+              }" $WEBHOOK_URL
+            exit 0
+          fi
+
+          echo "❌ Containers unhealthy or failed."
+
+          docker compose ps
+
+          # Notify deployment failure
+          curl -X POST -H "Content-Type: application/json" \
+            -d "{
+              \"embeds\": [{
+                \"title\": \"❌ Deployment Failed - $PROJECT_NAME\",
+                \"color\": 16711680,
+                \"fields\": [
+                  { \"name\": \"📂 Repository\", \"value\": \"\`${{ github.repository }}\`\", \"inline\": true },
+                  { \"name\": \"🛠 Branch\", \"value\": \"\`${{ github.ref_name }}\`\", \"inline\": true },
+                  { \"name\": \"👤 Triggered By\", \"value\": \"\`${{ github.actor }}\`\", \"inline\": true },
+                  { \"name\": \"📦 Container Status\", \"value\": \"\`Running: $RUNNING_CONTAINERS / $TOTAL_CONTAINERS, Failed: $FAILED_CONTAINERS\`\" }
+                ],
+                \"footer\": { \"text\": \"GitHub Actions | $(date +'%Y-%m-%d %H:%M:%S')\" }
+              }]
+            }" $WEBHOOK_URL
+
+          exit 1
+        EOF
