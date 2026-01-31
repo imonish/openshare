@@ -3,7 +3,7 @@ name: Deploy Staging API with Docker Compose
 on:
   push:
     branches:
-      - staging
+      - main
 
 jobs:
   deploy:
