@@ -44,9 +44,9 @@ jobs:
 
           cd $PROJECT_DIR
           git pull origin ${{ secrets.STAGING_API_BRANCH }}
-          docker compose down
-          docker compose build
-          docker compose up -d
+          docker compose -f docker-compose.dev.yml down
+          docker compose -f docker-compose.dev.yml build
+          docker compose -f docker-compose.dev.yml up -d
 
           # --- Intelligent wait for container states (from status check workflow) ---
           ATTEMPTS=5
