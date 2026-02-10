@@ -40,6 +40,9 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'health',
+    'vision_api.apps.VisionApiConfig',
+
+    'rest_framework',
 ]
 
 MIDDLEWARE = [
